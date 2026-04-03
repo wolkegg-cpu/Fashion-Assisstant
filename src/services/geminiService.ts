@@ -10,7 +10,13 @@ const withRetry = async <T>(fn: () => Promise<T>, retries = 3, delay = 2000): Pr
   try {
     return await fn();
   } catch (error: any) {
-    const isRateLimit = error.message?.includes("429") || error.message?.toLowerCase().includes("rate limit") || error.message?.toLowerCase().includes("quota");
+    const errorMsg = error.message?.toLowerCase() || "";
+    const isRateLimit = errorMsg.includes("429") || 
+                        errorMsg.includes("rate limit") || 
+                        errorMsg.includes("quota") || 
+                        errorMsg.includes("exhausted") ||
+                        errorMsg.includes("too many requests");
+    
     if (retries > 0 && isRateLimit) {
       console.warn(`Rate limit hit, retrying in ${delay}ms... (${retries} retries left)`);
       await new Promise(resolve => setTimeout(resolve, delay));
@@ -180,6 +186,7 @@ export const magicCutClothingItem = async (
   base64Image: string,
   selectionPath: { x: number; y: number }[]
 ): Promise<string> => {
+  // Image editing models often have tighter rate limits, so we increase retries and initial delay
   return withRetry(async () => {
     const ai = getAI();
     const response = await ai.models.generateContent({
@@ -213,5 +220,5 @@ export const magicCutClothingItem = async (
     }
 
     throw new Error("Gemini failed to generate the cut-out image. Please try selecting the item more clearly.");
-  });
+  }, 5, 3000); // 5 retries, 3s base delay
 };

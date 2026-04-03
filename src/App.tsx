@@ -298,6 +298,9 @@ export default function App() {
           y: Math.round(p.y * 1000)
         }));
 
+        // Add a small delay before the cut to ensure we don't hit rate limits
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
         const cutImage = await magicCutClothingItem(base64, normalizedPath);
         
         // Add a small delay to avoid hitting rate limits on back-to-back AI calls
