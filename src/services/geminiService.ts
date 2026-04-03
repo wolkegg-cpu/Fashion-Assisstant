@@ -1,0 +1,186 @@
+import { GoogleGenAI, Type } from "@google/genai";
+import { ClothingItem, UserPreferences } from "../types";
+
+const apiKey = process.env.GEMINI_API_KEY || "";
+const ai = new GoogleGenAI({ apiKey });
+
+export const tagClothingItem = async (base64Image: string): Promise<Partial<ClothingItem>> => {
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: [
+      {
+        parts: [
+          { text: "Analyze this clothing item and return its type, color, vibe, and category (top, bottom, shoes, outerwear, accessory) in JSON format." },
+          { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
+        ]
+      }
+    ],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          type: { type: Type.STRING },
+          color: { type: Type.STRING },
+          vibe: { type: Type.STRING },
+          category: { type: Type.STRING, enum: ["top", "bottom", "shoes", "outerwear", "accessory"] }
+        },
+        required: ["type", "color", "vibe", "category"]
+      }
+    }
+  });
+
+  return JSON.parse(response.text || "{}");
+};
+
+export const generateOutfit = async (
+  wardrobe: ClothingItem[],
+  preferences: UserPreferences,
+  occasion: string,
+  weather: string
+): Promise<{ itemIds: string[]; explanation: string; upliftAdvice: string }> => {
+  const wardrobeDescription = wardrobe.map(item => 
+    `ID: ${item.id}, Type: ${item.type}, Color: ${item.color}, Vibe: ${item.vibe}, Category: ${item.category}`
+  ).join("\n");
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `
+      You are a personal stylist.
+      User Wardrobe:
+      ${wardrobeDescription}
+
+      User Preferences:
+      Style: ${preferences.style}
+      Favorite Colors: ${preferences.favoriteColors.join(", ")}
+      Fit Preference: ${preferences.fitPreference}
+
+      Occasion: ${occasion}
+      Weather: ${weather}
+
+      Create a clean outfit using items from the wardrobe. 
+      Return the IDs of the items, an explanation of why it works, and specific "uplift advice" on how to take the outfit to the next level (e.g., accessories to add, how to tuck the shirt, or grooming tips) in JSON format.
+    `,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          itemIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+          explanation: { type: Type.STRING },
+          upliftAdvice: { type: Type.STRING }
+        },
+        required: ["itemIds", "explanation", "upliftAdvice"]
+      }
+    }
+  });
+
+  return JSON.parse(response.text || "{}");
+};
+
+export const rateOutfit = async (
+  base64Image: string,
+  preferences: UserPreferences
+): Promise<{ rating: number; feedback: string }> => {
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: [
+      {
+        parts: [
+          { text: `Rate this outfit from 1-10 and provide feedback based on the user's style preference: ${preferences.style}. Focus on fit, color balance, and style. Return in JSON format.` },
+          { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
+        ]
+      }
+    ],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          rating: { type: Type.NUMBER },
+          feedback: { type: Type.STRING }
+        },
+        required: ["rating", "feedback"]
+      }
+    }
+  });
+
+  return JSON.parse(response.text || "{}");
+};
+
+export const updatePreferencesFromItem = async (
+  currentPrefs: UserPreferences,
+  newItem: Partial<ClothingItem>
+): Promise<UserPreferences> => {
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: `
+      Current User Preferences:
+      Style: ${currentPrefs.style}
+      Favorite Colors: ${currentPrefs.favoriteColors.join(", ")}
+      Fit Preference: ${currentPrefs.fitPreference}
+
+      New Clothing Item Added:
+      Type: ${newItem.type}
+      Color: ${newItem.color}
+      Vibe: ${newItem.vibe}
+      Category: ${newItem.category}
+
+      Based on this new item, should the user's style preferences be updated? 
+      If the new item represents a shift or addition to their style, update the preferences.
+      Return the updated UserPreferences in JSON format.
+    `,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          style: { type: Type.STRING },
+          favoriteColors: { type: Type.ARRAY, items: { type: Type.STRING } },
+          fitPreference: { type: Type.STRING }
+        },
+        required: ["style", "favoriteColors", "fitPreference"]
+      }
+    }
+  });
+
+  return JSON.parse(response.text || "{}");
+};
+
+export const magicCutClothingItem = async (
+  base64Image: string,
+  selectionPath: { x: number; y: number }[]
+): Promise<string> => {
+  // We send the image and describe the selection to Gemini to "cut it out"
+  // Gemini 3.1 Flash Image is great for this kind of visual reasoning and editing
+  const response = await ai.models.generateContent({
+    model: "gemini-3.1-flash-image-preview",
+    contents: [
+      {
+        parts: [
+          { 
+            text: `I have selected an area in this image. Please identify the clothing item within or near the selection and "cut it out" by removing the background completely. 
+            Return ONLY the isolated clothing item as a sticker on a plain, solid white background. 
+            Do not include any other objects or people.
+            The selection path coordinates (normalized 0-1000) are: ${JSON.stringify(selectionPath)}` 
+          },
+          { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
+        ]
+      }
+    ],
+    config: {
+      imageConfig: {
+        aspectRatio: "3:4",
+        imageSize: "1K"
+      }
+    }
+  });
+
+  for (const part of response.candidates?.[0]?.content?.parts || []) {
+    if (part.inlineData) {
+      return `data:image/png;base64,${part.inlineData.data}`;
+    }
+  }
+
+  throw new Error("Gemini failed to generate the cut-out image.");
+};
