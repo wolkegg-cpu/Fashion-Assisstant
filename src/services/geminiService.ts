@@ -13,7 +13,7 @@ export const tagClothingItem = async (base64Image: string): Promise<Partial<Clot
     contents: [
       {
         parts: [
-          { text: "Analyze this clothing item and return its type, color, vibe, and category (top, bottom, shoes, outerwear, accessory) in JSON format." },
+          { text: "Analyze this clothing item and return its type, color, vibe, category (top, bottom, shoes, outerwear, accessory), and a brief, catchy description (max 15 words) in JSON format." },
           { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
         ]
       }
@@ -26,9 +26,10 @@ export const tagClothingItem = async (base64Image: string): Promise<Partial<Clot
           type: { type: Type.STRING },
           color: { type: Type.STRING },
           vibe: { type: Type.STRING },
-          category: { type: Type.STRING, enum: ["top", "bottom", "shoes", "outerwear", "accessory"] }
+          category: { type: Type.STRING, enum: ["top", "bottom", "shoes", "outerwear", "accessory"] },
+          description: { type: Type.STRING }
         },
-        required: ["type", "color", "vibe", "category"]
+        required: ["type", "color", "vibe", "category", "description"]
       }
     }
   });

@@ -14,7 +14,9 @@ import {
   Info,
   X,
   Upload,
-  Star
+  Star,
+  Pencil,
+  Heart
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Cropper, { Area } from 'react-easy-crop';
@@ -48,7 +50,8 @@ export default function App() {
   
   // New States
   const [wardrobeFilter, setWardrobeFilter] = useState<string>('all');
-  const [generatorAdviceTab, setGeneratorAdviceTab] = useState<'info' | 'uplift' | null>('info');
+  const [wardrobeSection, setWardrobeSection] = useState<'items' | 'outfits'>('items');
+  const [generatorAdviceTab, setGeneratorAdviceTab] = useState<'info' | 'uplift' | null>(null);
   const [selectedOutfitItem, setSelectedOutfitItem] = useState<ClothingItem | null>(null);
 
   // Crop Modal State
@@ -61,6 +64,7 @@ export default function App() {
   const [isMagicCutMode, setIsMagicCutMode] = useState(false);
   const [selectionPath, setSelectionPath] = useState<{ x: number, y: number }[]>([]);
   const [bulkUploadProgress, setBulkUploadProgress] = useState<{ current: number, total: number } | null>(null);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [outfitPositions, setOutfitPositions] = useState<Record<string, { x: number, y: number }>>({});
   const [isDrawing, setIsDrawing] = useState(false);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
@@ -146,68 +150,63 @@ export default function App() {
   const handleFileUpload = async (files: File[]) => {
     if (files.length === 0) return;
     
-    if (files.length === 1) {
-      const file = files[0];
-      const reader = new FileReader();
-      reader.onload = () => {
-        setCropImage(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    } else {
-      // Bulk upload mode
-      setIsLoading(true);
-      setError(null);
-      setBulkUploadProgress({ current: 0, total: files.length });
-      
-      try {
-        // Check if API key is present
-        if (!hasApiKey) {
-          if (window.aistudio && !(await window.aistudio.hasSelectedApiKey())) {
-            await window.aistudio.openSelectKey();
-          } else {
-            throw new Error("Gemini API Key is missing. Please set VITE_GEMINI_API_KEY in your Vercel environment variables and redeploy.");
-          }
-        }
-
-        const newItems: ClothingItem[] = [];
-        
-        // Process in sequence to avoid hitting rate limits too hard, but could be parallelized
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          setBulkUploadProgress({ current: i + 1, total: files.length });
-          
-          const base64WithHeader = await new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.readAsDataURL(file);
-          });
-          
-          const base64 = base64WithHeader.split(',')[1];
-          const tags = await tagClothingItem(base64);
-          
-          newItems.push({
-            id: Math.random().toString(36).substr(2, 9),
-            type: tags.type || 'unknown',
-            color: tags.color || 'unknown',
-            vibe: tags.vibe || 'unknown',
-            category: tags.category as any || 'top',
-            imageUrl: base64WithHeader
-          });
-        }
-        
-        setWardrobe(prev => [...prev, ...newItems]);
-      } catch (err: any) {
-        console.error("Bulk upload error:", err);
-        if (err.message?.includes("Requested entity was not found") && window.aistudio) {
-          setError("API Key issue detected. Opening key selector...");
+    setIsLoading(true);
+    setError(null);
+    setBulkUploadProgress({ current: 0, total: files.length });
+    
+    try {
+      // Check if API key is present
+      if (!hasApiKey) {
+        if (window.aistudio && !(await window.aistudio.hasSelectedApiKey())) {
           await window.aistudio.openSelectKey();
-          return;
+        } else {
+          throw new Error("Gemini API Key is missing. Please set VITE_GEMINI_API_KEY in your Vercel environment variables and redeploy.");
         }
-        setError(err.message || "Failed to process some images.");
-      } finally {
-        setIsLoading(false);
-        setBulkUploadProgress(null);
       }
+
+      const newItems: ClothingItem[] = [];
+      
+      // Process in sequence to avoid hitting rate limits too hard
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setBulkUploadProgress({ current: i + 1, total: files.length });
+        
+        const base64WithHeader = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(file);
+        });
+        
+        const base64 = base64WithHeader.split(',')[1];
+        const tags = await tagClothingItem(base64);
+        
+        newItems.push({
+          id: Math.random().toString(36).substr(2, 9),
+          type: tags.type || 'unknown',
+          color: tags.color || 'unknown',
+          vibe: tags.vibe || 'unknown',
+          category: tags.category as any || 'top',
+          imageUrl: base64WithHeader
+        });
+
+        // Add a small delay between items if more than one
+        if (files.length > 1 && i < files.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        }
+      }
+      
+      setWardrobe(prev => [...prev, ...newItems]);
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      if (err.message?.includes("Requested entity was not found") && window.aistudio) {
+        setError("API Key issue detected. Opening key selector...");
+        await window.aistudio.openSelectKey();
+        return;
+      }
+      setError(err.message || "Failed to process some images.");
+    } finally {
+      setIsLoading(false);
+      setBulkUploadProgress(null);
     }
   };
 
@@ -234,16 +233,24 @@ export default function App() {
 
       const tags = await tagClothingItem(base64);
       
-      const newItem: ClothingItem = {
-        id: Math.random().toString(36).substr(2, 9),
-        type: tags.type || 'unknown',
-        color: tags.color || 'unknown',
-        vibe: tags.vibe || 'unknown',
-        category: tags.category as any || 'top',
-        imageUrl: croppedImage
-      };
-      
-      setWardrobe(prev => [...prev, newItem]);
+      if (editingItemId) {
+        setWardrobe(prev => prev.map(item => 
+          item.id === editingItemId 
+            ? { ...item, imageUrl: croppedImage, ...tags } 
+            : item
+        ));
+        setEditingItemId(null);
+      } else {
+        const newItem: ClothingItem = {
+          id: Math.random().toString(36).substr(2, 9),
+          type: tags.type || 'unknown',
+          color: tags.color || 'unknown',
+          vibe: tags.vibe || 'unknown',
+          category: tags.category as any || 'top',
+          imageUrl: croppedImage
+        };
+        setWardrobe(prev => [...prev, newItem]);
+      }
 
       // Update preferences based on new item
       try {
@@ -299,16 +306,24 @@ export default function App() {
         const cutBase64 = cutImage.split(',')[1];
         const tags = await tagClothingItem(cutBase64);
         
-        const newItem: ClothingItem = {
-          id: Math.random().toString(36).substr(2, 9),
-          type: tags.type || 'unknown',
-          color: tags.color || 'unknown',
-          vibe: tags.vibe || 'unknown',
-          category: tags.category as any || 'top',
-          imageUrl: cutImage
-        };
-        
-        setWardrobe(prev => [...prev, newItem]);
+        if (editingItemId) {
+          setWardrobe(prev => prev.map(item => 
+            item.id === editingItemId 
+              ? { ...item, imageUrl: cutImage, ...tags } 
+              : item
+          ));
+          setEditingItemId(null);
+        } else {
+          const newItem: ClothingItem = {
+            id: Math.random().toString(36).substr(2, 9),
+            type: tags.type || 'unknown',
+            color: tags.color || 'unknown',
+            vibe: tags.vibe || 'unknown',
+            category: tags.category as any || 'top',
+            imageUrl: cutImage
+          };
+          setWardrobe(prev => [...prev, newItem]);
+        }
 
         // Update preferences
         try {
@@ -411,6 +426,7 @@ export default function App() {
         };
       });
       setOutfitPositions(newPositions);
+      setGeneratorAdviceTab(null);
 
       setCurrentOutfit({ 
         items: selectedItems, 
@@ -443,6 +459,27 @@ export default function App() {
 
   const deleteItem = (id: string) => {
     setWardrobe(prev => prev.filter(item => item.id !== id));
+  };
+
+  const saveOutfit = () => {
+    if (!currentOutfit) return;
+    const newOutfit: Outfit = {
+      id: Math.random().toString(36).substr(2, 9),
+      items: currentOutfit.items,
+      explanation: currentOutfit.explanation,
+      upliftAdvice: currentOutfit.upliftAdvice,
+      date: new Date().toISOString(),
+      occasion: 'Saved Outfit',
+      weather: 'Any'
+    };
+    setOutfits(prev => [newOutfit, ...prev]);
+    setCurrentOutfit(null);
+    setActiveTab('wardrobe');
+    setWardrobeSection('outfits');
+  };
+
+  const deleteOutfit = (id: string) => {
+    setOutfits(prev => prev.filter(o => o.id !== id));
   };
 
   return (
@@ -527,7 +564,10 @@ export default function App() {
                   <div className="flex flex-col gap-3">
                     <div className="flex gap-3">
                       <button 
-                        onClick={() => setCropImage(null)}
+                        onClick={() => {
+                          setCropImage(null);
+                          setEditingItemId(null);
+                        }}
                         className="flex-1 px-6 py-4 rounded-2xl bg-zinc-800 hover:bg-zinc-700 font-bold transition-all active:scale-95"
                       >
                         Cancel
@@ -545,7 +585,7 @@ export default function App() {
                       className="w-full px-6 py-5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 font-bold flex items-center justify-center gap-2 transition-all shadow-xl shadow-indigo-600/20 active:scale-95"
                     >
                       <CheckCircle2 className="w-6 h-6" />
-                      Confirm & Add to Closet
+                      {editingItemId ? 'Save Changes' : 'Confirm & Add to Closet'}
                     </button>
                   </div>
                 </>
@@ -577,11 +617,77 @@ export default function App() {
                     className="w-full px-6 py-5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 font-bold flex items-center justify-center gap-2 transition-all shadow-xl shadow-indigo-600/20 active:scale-95"
                   >
                     <Sparkles className="w-6 h-6" />
-                    Magic Cut & Add
+                    {editingItemId ? 'Save Cut' : 'Magic Cut & Add'}
                   </button>
                 </div>
               )}
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Item Detail Modal */}
+      <AnimatePresence>
+        {selectedOutfitItem && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6"
+            onClick={() => setSelectedOutfitItem(null)}
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-zinc-900 w-full max-w-md rounded-[2.5rem] overflow-hidden border border-zinc-800 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="relative aspect-[3/4]">
+                <img 
+                  src={selectedOutfitItem.imageUrl} 
+                  className="w-full h-full object-cover" 
+                  referrerPolicy="no-referrer"
+                />
+                <button 
+                  onClick={() => setSelectedOutfitItem(null)}
+                  className="absolute top-4 right-4 p-2 rounded-full bg-black/50 backdrop-blur-md text-white hover:bg-zinc-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-8 space-y-6">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h2 className="text-2xl font-bold text-white capitalize">{selectedOutfitItem.type}</h2>
+                    <span className="px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-bold uppercase tracking-widest">
+                      {selectedOutfitItem.category}
+                    </span>
+                  </div>
+                  <p className="text-zinc-400 text-sm leading-relaxed">
+                    {selectedOutfitItem.description || `A ${selectedOutfitItem.color} ${selectedOutfitItem.type} with a ${selectedOutfitItem.vibe} vibe.`}
+                  </p>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4 pt-2">
+                  <div className="p-4 rounded-2xl bg-zinc-800/50 border border-zinc-800">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1">Color</p>
+                    <p className="text-sm font-medium text-zinc-200 capitalize">{selectedOutfitItem.color}</p>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-zinc-800/50 border border-zinc-800">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1">Vibe</p>
+                    <p className="text-sm font-medium text-zinc-200 capitalize">{selectedOutfitItem.vibe}</p>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => setSelectedOutfitItem(null)}
+                  className="w-full py-4 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold transition-all active:scale-95"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -596,7 +702,12 @@ export default function App() {
       </nav>
 
       {/* Main Content */}
-      <main className="pb-32 md:pb-8 md:pl-24 max-w-5xl mx-auto p-4 md:p-8 pt-6 md:pt-10">
+      <main className={cn(
+        "pb-32 md:pb-8 md:pl-24 mx-auto transition-all duration-500",
+        currentOutfit && activeTab === 'generator' 
+          ? "max-w-none p-0 md:p-0 pt-0 md:pt-0" 
+          : "max-w-5xl p-4 md:p-8 pt-6 md:pt-10"
+      )}>
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' && (
             <motion.div key="dashboard" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-8">
@@ -655,91 +766,216 @@ export default function App() {
           {activeTab === 'wardrobe' && (
             <motion.div key="wardrobe" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-8">
               <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-                <div>
-                  <h1 className="text-3xl font-bold">Wardrobe</h1>
-                  <p className="text-zinc-400">Manage your clothing items</p>
-                </div>
-                
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex bg-zinc-900 p-1.5 rounded-2xl border border-zinc-800 overflow-x-auto no-scrollbar max-w-full">
-                    {['all', 'top', 'bottom', 'shoes', 'accessory'].map((cat) => (
-                      <button
-                        key={cat}
-                        onClick={() => setWardrobeFilter(cat)}
-                        className={cn(
-                          "px-5 py-2.5 rounded-xl text-xs font-bold capitalize transition-all whitespace-nowrap",
-                          wardrobeFilter === cat 
-                            ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/20" 
-                            : "text-zinc-500 hover:text-zinc-300"
-                        )}
-                      >
-                        {cat}
-                      </button>
-                    ))}
+                <div className="space-y-4">
+                  <div>
+                    <h1 className="text-3xl font-bold">My Closet</h1>
+                    <p className="text-zinc-400">Manage your collection and saved looks</p>
                   </div>
                   
-                  <div className="relative">
-                    <input type="file" multiple accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFileChange} />
-                    <button className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-2 transition-all shadow-xl shadow-indigo-600/20 active:scale-95">
-                      <Plus className="w-5 h-5" />
-                      Add Items
+                  <div className="flex bg-zinc-900 p-1 rounded-2xl border border-zinc-800 w-fit">
+                    <button
+                      onClick={() => setWardrobeSection('items')}
+                      className={cn(
+                        "px-6 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
+                        wardrobeSection === 'items' ? "bg-zinc-800 text-white shadow-lg" : "text-zinc-500 hover:text-zinc-300"
+                      )}
+                    >
+                      <Shirt className="w-4 h-4" />
+                      Items
+                    </button>
+                    <button
+                      onClick={() => setWardrobeSection('outfits')}
+                      className={cn(
+                        "px-6 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2",
+                        wardrobeSection === 'outfits' ? "bg-zinc-800 text-white shadow-lg" : "text-zinc-500 hover:text-zinc-300"
+                      )}
+                    >
+                      <Heart className="w-4 h-4" />
+                      Outfits
                     </button>
                   </div>
                 </div>
+                
+                {wardrobeSection === 'items' && (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex bg-zinc-900 p-1.5 rounded-2xl border border-zinc-800 overflow-x-auto no-scrollbar max-w-full">
+                      {['all', 'top', 'bottom', 'shoes', 'accessory'].map((cat) => (
+                        <button
+                          key={cat}
+                          onClick={() => setWardrobeFilter(cat)}
+                          className={cn(
+                            "px-5 py-2.5 rounded-xl text-xs font-bold capitalize transition-all whitespace-nowrap",
+                            wardrobeFilter === cat 
+                              ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/20" 
+                              : "text-zinc-500 hover:text-zinc-300"
+                          )}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+                    
+                    <div className="relative">
+                      <input type="file" multiple accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFileChange} />
+                      <button className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-2 transition-all shadow-xl shadow-indigo-600/20 active:scale-95">
+                        <Plus className="w-5 h-5" />
+                        Add Items
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {isLoading && (
-                <div className="flex items-center justify-center p-12 bg-zinc-900 rounded-3xl border border-zinc-800 border-dashed">
-                  <div className="text-center">
-                    <Loader2 className="w-8 h-8 animate-spin mx-auto text-indigo-500 mb-2" />
-                    <p className="text-zinc-400">
-                      {bulkUploadProgress 
-                        ? `AI is tagging item ${bulkUploadProgress.current} of ${bulkUploadProgress.total}...`
-                        : "AI is tagging your items..."}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {wardrobe.length === 0 && !isLoading ? (
-                <div className="p-12 md:p-20 rounded-3xl border-2 border-dashed border-zinc-800 bg-zinc-900/50 flex flex-col items-center justify-center text-center relative overflow-hidden group">
-                  <input type="file" multiple accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={handleFileChange} />
-                  <div className="w-16 h-16 rounded-full bg-zinc-800 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                    <Upload className="w-8 h-8 text-zinc-400" />
-                  </div>
-                  <h2 className="text-xl font-bold">Your closet is empty</h2>
-                  <p className="text-zinc-500 mt-2 max-w-xs text-sm">Tap here to upload photos of your clothes to start building your AI wardrobe.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
-                  {wardrobe
-                    .filter(item => wardrobeFilter === 'all' || item.category === wardrobeFilter)
-                    .map(item => (
-                    <motion.div 
-                      layout 
-                      key={item.id} 
-                      className="group relative aspect-[3/4] rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 shadow-lg"
-                    >
-                      <img src={item.imageUrl} alt={item.type} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" referrerPolicy="no-referrer" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-3 flex flex-col justify-end">
-                        <p className="text-xs font-bold uppercase tracking-wider text-white">{item.type}</p>
-                        <p className="text-[10px] text-zinc-300">{item.color} • {item.vibe}</p>
-                        <button 
-                          onClick={() => deleteItem(item.id)} 
-                          className="absolute top-2 right-2 p-2.5 rounded-xl bg-black/50 backdrop-blur-md text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500 active:scale-90"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+              {wardrobeSection === 'items' ? (
+                <>
+                  {isLoading && (
+                    <div className="flex items-center justify-center p-12 bg-zinc-900 rounded-3xl border border-zinc-800 border-dashed">
+                      <div className="text-center">
+                        <Loader2 className="w-8 h-8 animate-spin mx-auto text-indigo-500 mb-2" />
+                        <p className="text-zinc-400">
+                          {bulkUploadProgress 
+                            ? `AI is tagging item ${bulkUploadProgress.current} of ${bulkUploadProgress.total}...`
+                            : "AI is tagging your items..."}
+                        </p>
                       </div>
-                    </motion.div>
-                  ))}
+                    </div>
+                  )}
+
+                  {wardrobe.length === 0 && !isLoading ? (
+                    <div className="p-12 md:p-20 rounded-3xl border-2 border-dashed border-zinc-800 bg-zinc-900/50 flex flex-col items-center justify-center text-center relative overflow-hidden group">
+                      <input type="file" multiple accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={handleFileChange} />
+                      <div className="w-16 h-16 rounded-full bg-zinc-800 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                        <Upload className="w-8 h-8 text-zinc-400" />
+                      </div>
+                      <h2 className="text-xl font-bold">Your closet is empty</h2>
+                      <p className="text-zinc-500 mt-2 max-w-xs text-sm">Tap here to upload photos of your clothes to start building your AI wardrobe.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-6">
+                      {wardrobe
+                        .filter(item => wardrobeFilter === 'all' || item.category === wardrobeFilter)
+                        .map(item => (
+                        <motion.div 
+                          layout 
+                          key={item.id} 
+                          onClick={() => setSelectedOutfitItem(item)}
+                          className="group relative aspect-[3/4] rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 shadow-lg cursor-pointer"
+                        >
+                          <img src={item.imageUrl} alt={item.type} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" referrerPolicy="no-referrer" />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-3 flex flex-col justify-end">
+                            <p className="text-xs font-bold uppercase tracking-wider text-white">{item.type}</p>
+                            <p className="text-[10px] text-zinc-300">{item.color} • {item.vibe}</p>
+                            <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingItemId(item.id);
+                                  setCropImage(item.imageUrl);
+                                }} 
+                                className="p-2.5 rounded-xl bg-black/50 backdrop-blur-md text-white hover:bg-indigo-600 active:scale-90"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteItem(item.id);
+                                }} 
+                                className="p-2.5 rounded-xl bg-black/50 backdrop-blur-md text-white hover:bg-red-500 active:scale-90"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="space-y-6">
+                  {outfits.length === 0 ? (
+                    <div className="p-12 md:p-20 rounded-3xl border-2 border-dashed border-zinc-800 bg-zinc-900/50 flex flex-col items-center justify-center text-center">
+                      <div className="w-16 h-16 rounded-full bg-zinc-800 flex items-center justify-center mb-4">
+                        <Heart className="w-8 h-8 text-zinc-600" />
+                      </div>
+                      <h2 className="text-xl font-bold">No saved outfits yet</h2>
+                      <p className="text-zinc-500 mt-2 max-w-xs text-sm">Generate an outfit in the Style tab and save it to see it here.</p>
+                      <button 
+                        onClick={() => setActiveTab('generator')}
+                        className="mt-6 px-8 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition-all active:scale-95"
+                      >
+                        Go to Style
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {outfits.map((outfit) => (
+                        <motion.div 
+                          key={outfit.id}
+                          layout
+                          className="bg-zinc-900 border border-zinc-800 rounded-[2.5rem] overflow-hidden group hover:border-zinc-700 transition-all flex flex-col"
+                        >
+                          <div className="p-6 flex-1 space-y-4">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <h3 className="font-bold text-lg">{outfit.occasion}</h3>
+                                <p className="text-xs text-zinc-500">{new Date(outfit.date).toLocaleDateString()}</p>
+                              </div>
+                              <button 
+                                onClick={() => deleteOutfit(outfit.id)}
+                                className="p-2 rounded-xl bg-zinc-800 text-zinc-500 hover:text-red-400 hover:bg-red-400/10 transition-all"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                            
+                            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
+                              {outfit.items.map((item) => (
+                                <div key={item.id} className="w-16 h-20 shrink-0 rounded-lg overflow-hidden border border-zinc-800">
+                                  <img src={item.imageUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                </div>
+                              ))}
+                            </div>
+
+                            {outfit.explanation && (
+                              <p className="text-xs text-zinc-400 line-clamp-2 italic">"{outfit.explanation}"</p>
+                            )}
+                          </div>
+                          
+                          <button 
+                            onClick={() => {
+                              setCurrentOutfit({
+                                items: outfit.items,
+                                explanation: outfit.explanation || '',
+                                upliftAdvice: outfit.upliftAdvice || ''
+                              });
+                              setActiveTab('generator');
+                            }}
+                            className="w-full py-4 bg-zinc-800/50 hover:bg-indigo-600/10 hover:text-indigo-400 text-zinc-400 text-xs font-bold uppercase tracking-widest border-t border-zinc-800 transition-all"
+                          >
+                            View on Canvas
+                          </button>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </motion.div>
           )}
 
           {activeTab === 'generator' && (
-            <motion.div key="generator" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-8 min-h-[70vh]">
+            <motion.div 
+              key="generator" 
+              initial={{ opacity: 0, y: 10 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              exit={{ opacity: 0, y: -10 }} 
+              className={cn(
+                "transition-all duration-500",
+                currentOutfit ? "space-y-0 min-h-0" : "space-y-8 min-h-[70vh]"
+              )}
+            >
               {!currentOutfit ? (
                 <>
                   <header>
@@ -800,9 +1036,12 @@ export default function App() {
                   </div>
                 </>
               ) : (
-                <div className="relative h-[75vh] md:h-[80vh] w-full overflow-hidden bg-zinc-900/40 rounded-[3rem] border border-zinc-800/50 backdrop-blur-sm shadow-2xl">
+                <div className={cn(
+                  "relative w-full overflow-hidden bg-zinc-950 transition-all duration-500",
+                  "h-[90vh] md:rounded-none border-none shadow-none"
+                )}>
                   {/* Canvas Area */}
-                  <div className="absolute inset-0 p-8 touch-none">
+                  <div className="absolute inset-0 p-4 md:p-8 touch-none">
                     <div className="absolute top-6 left-8 z-50">
                       <button 
                         onClick={() => setCurrentOutfit(null)}
@@ -819,6 +1058,7 @@ export default function App() {
                           key={item.id}
                           drag
                           dragMomentum={false}
+                          onTap={() => setSelectedOutfitItem(item)}
                           initial={{ 
                             x: outfitPositions[item.id]?.x || 0, 
                             y: outfitPositions[item.id]?.y || 0,
@@ -870,6 +1110,13 @@ export default function App() {
                       >
                         <Sparkles className="w-4 h-4" />
                         Advice
+                      </button>
+                      <button 
+                        onClick={saveOutfit}
+                        className="px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all flex items-center gap-2 text-zinc-500 hover:text-white"
+                      >
+                        <Heart className="w-4 h-4" />
+                        Save
                       </button>
                     </div>
 

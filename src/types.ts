@@ -5,6 +5,7 @@ export interface ClothingItem {
   vibe: string;
   imageUrl: string;
   category: 'top' | 'bottom' | 'shoes' | 'outerwear' | 'accessory';
+  description?: string;
 }
 
 export interface Outfit {
@@ -15,6 +16,8 @@ export interface Outfit {
   occasion: string;
   weather: string;
   date: string;
+  explanation?: string;
+  upliftAdvice?: string;
 }
 
 export interface UserPreferences {
