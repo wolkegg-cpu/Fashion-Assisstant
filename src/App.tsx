@@ -39,6 +39,10 @@ export default function App() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  const hasApiKey = !!(process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY);
+  
   const [currentOutfit, setCurrentOutfit] = useState<{ items: ClothingItem[], explanation: string, upliftAdvice: string } | null>(null);
   const [feedbackResult, setFeedbackResult] = useState<{ rating: number, feedback: string } | null>(null);
   
@@ -157,12 +161,19 @@ export default function App() {
     if (!cropImage || !croppedAreaPixels) return;
     
     setIsLoading(true);
+    setError(null);
     const imageToProcess = cropImage;
     setCropImage(null); // Close modal
 
     try {
       const croppedImage = await getCroppedImg(imageToProcess, croppedAreaPixels);
       const base64 = croppedImage.split(',')[1];
+      
+      // Check if API key is present
+      if (!hasApiKey) {
+        throw new Error("Gemini API Key is missing. Please set VITE_GEMINI_API_KEY in your Vercel environment variables and redeploy.");
+      }
+
       const tags = await tagClothingItem(base64);
       
       const newItem: ClothingItem = {
@@ -183,8 +194,9 @@ export default function App() {
       } catch (err) {
         console.error("Failed to update preferences from item:", err);
       }
-    } catch (error) {
-      console.error("Error processing cropped image:", error);
+    } catch (err: any) {
+      console.error("Error processing cropped image:", err);
+      setError(err.message || "Failed to process image. Check your internet connection or API key.");
     } finally {
       setIsLoading(false);
     }
@@ -194,6 +206,7 @@ export default function App() {
     if (!cropImage || selectionPath.length === 0) return;
     
     setIsLoading(true);
+    setError(null);
     const imageToProcess = cropImage;
     setCropImage(null);
     setIsMagicCutMode(false);
@@ -201,6 +214,12 @@ export default function App() {
 
     try {
       const base64 = imageToProcess.split(',')[1];
+      
+      // Check if API key is present
+      if (!hasApiKey) {
+        throw new Error("Gemini API Key is missing. Please set VITE_GEMINI_API_KEY in your Vercel environment variables and redeploy.");
+      }
+
       // Normalize coordinates for Gemini (0-1000)
       const normalizedPath = selectionPath.map(p => ({
         x: Math.round(p.x * 1000),
@@ -229,8 +248,9 @@ export default function App() {
       } catch (err) {
         console.error("Failed to update preferences:", err);
       }
-    } catch (error) {
-      console.error("Error magic cutting image:", error);
+    } catch (err: any) {
+      console.error("Error magic cutting image:", err);
+      setError(err.message || "Failed to cut image. Check your internet connection or API key.");
     } finally {
       setIsLoading(false);
     }
@@ -338,6 +358,23 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-indigo-500/30">
+      {/* Error Toast */}
+      <AnimatePresence>
+        {error && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="fixed bottom-24 left-6 right-6 z-[110] md:left-auto md:right-6 md:w-96"
+          >
+            <div className="bg-red-500 text-white p-4 rounded-2xl shadow-2xl flex items-center gap-3">
+              <X className="w-5 h-5 shrink-0 cursor-pointer" onClick={() => setError(null)} />
+              <p className="text-sm font-medium">{error}</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Crop Modal */}
       <AnimatePresence>
         {cropImage && (
@@ -803,6 +840,16 @@ export default function App() {
 
               <div className="max-w-2xl space-y-6">
                 <div className="p-8 rounded-3xl bg-zinc-900 border border-zinc-800 space-y-6">
+                  <div className="flex items-center justify-between p-4 rounded-2xl bg-zinc-800/50 border border-zinc-700">
+                    <div className="flex items-center gap-3">
+                      <div className={cn("w-3 h-3 rounded-full", hasApiKey ? "bg-green-500" : "bg-red-500")} />
+                      <span className="text-sm font-medium">Gemini API Status</span>
+                    </div>
+                    <span className="text-xs font-mono text-zinc-500">
+                      {hasApiKey ? "Configured" : "Missing Key"}
+                    </span>
+                  </div>
+
                   <div>
                     <label className="text-sm font-medium text-zinc-400 block mb-2">Style Vibe</label>
                     <input 
