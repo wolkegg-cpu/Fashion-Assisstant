@@ -191,7 +191,7 @@ export default function App() {
 
         // Add a small delay between items if more than one
         if (files.length > 1 && i < files.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1500));
+          await new Promise(resolve => setTimeout(resolve, 3000));
         }
       }
       
@@ -433,8 +433,9 @@ export default function App() {
         explanation: result.explanation,
         upliftAdvice: result.upliftAdvice
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error generating outfit:", error);
+      setError(error.message || "Failed to generate outfit. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -480,6 +481,34 @@ export default function App() {
 
   const deleteOutfit = (id: string) => {
     setOutfits(prev => prev.filter(o => o.id !== id));
+  };
+
+  const longPressTimer = React.useRef<NodeJS.Timeout | null>(null);
+  const isLongPressTriggered = React.useRef(false);
+
+  const startLongPress = (onLongPress: () => void) => {
+    isLongPressTriggered.current = false;
+    longPressTimer.current = setTimeout(() => {
+      isLongPressTriggered.current = true;
+      onLongPress();
+    }, 600);
+  };
+
+  const stopLongPress = (onClick?: () => void) => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    if (!isLongPressTriggered.current && onClick) {
+      onClick();
+    }
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
   };
 
   return (
@@ -858,7 +887,12 @@ export default function App() {
                         <motion.div 
                           layout 
                           key={item.id} 
-                          onClick={() => setSelectedOutfitItem(item)}
+                          onPointerDown={() => startLongPress(() => {
+                            setEditingItemId(item.id);
+                            setCropImage(item.imageUrl);
+                          })}
+                          onPointerUp={() => stopLongPress(() => setSelectedOutfitItem(item))}
+                          onPointerMove={cancelLongPress}
                           className="group relative aspect-[3/4] rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-800 shadow-lg cursor-pointer"
                         >
                           <img src={item.imageUrl} alt={item.type} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" referrerPolicy="no-referrer" />
@@ -866,16 +900,6 @@ export default function App() {
                             <p className="text-xs font-bold uppercase tracking-wider text-white">{item.type}</p>
                             <p className="text-[10px] text-zinc-300">{item.color} • {item.vibe}</p>
                             <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingItemId(item.id);
-                                  setCropImage(item.imageUrl);
-                                }} 
-                                className="p-2.5 rounded-xl bg-black/50 backdrop-blur-md text-white hover:bg-indigo-600 active:scale-90"
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
                               <button 
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -1058,7 +1082,9 @@ export default function App() {
                           key={item.id}
                           drag
                           dragMomentum={false}
-                          onTap={() => setSelectedOutfitItem(item)}
+                          onPointerDown={() => startLongPress(() => setSelectedOutfitItem(item))}
+                          onPointerUp={() => stopLongPress()}
+                          onPointerMove={cancelLongPress}
                           initial={{ 
                             x: outfitPositions[item.id]?.x || 0, 
                             y: outfitPositions[item.id]?.y || 0,
