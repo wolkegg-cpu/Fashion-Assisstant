@@ -22,6 +22,7 @@ import { getCroppedImg } from './lib/cropImage';
 import { ClothingItem, Outfit, UserPreferences } from './types';
 import { tagClothingItem, generateOutfit, rateOutfit, updatePreferencesFromItem, magicCutClothingItem } from './services/geminiService';
 import { cn } from './lib/utils';
+import { get, set } from 'idb-keyval';
 
 const STORAGE_KEY_WARDROBE = 'ai_stylist_wardrobe';
 const STORAGE_KEY_OUTFITS = 'ai_stylist_outfits';
@@ -37,6 +38,7 @@ export default function App() {
     fitPreference: 'oversized'
   });
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
   const [currentOutfit, setCurrentOutfit] = useState<{ items: ClothingItem[], explanation: string, upliftAdvice: string } | null>(null);
   const [feedbackResult, setFeedbackResult] = useState<{ rating: number, feedback: string } | null>(null);
   
@@ -57,29 +59,83 @@ export default function App() {
   const [isDrawing, setIsDrawing] = useState(false);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
 
-  // Load data from localStorage
+  // Load data from IndexedDB with migration from localStorage
   useEffect(() => {
-    const savedWardrobe = localStorage.getItem(STORAGE_KEY_WARDROBE);
-    const savedOutfits = localStorage.getItem(STORAGE_KEY_OUTFITS);
-    const savedPrefs = localStorage.getItem(STORAGE_KEY_PREFS);
+    const loadData = async () => {
+      try {
+        // Try to get from IndexedDB first
+        let savedWardrobe = await get(STORAGE_KEY_WARDROBE);
+        let savedOutfits = await get(STORAGE_KEY_OUTFITS);
+        let savedPrefs = await get(STORAGE_KEY_PREFS);
 
-    if (savedWardrobe) setWardrobe(JSON.parse(savedWardrobe));
-    if (savedOutfits) setOutfits(JSON.parse(savedOutfits));
-    if (savedPrefs) setPrefs(JSON.parse(savedPrefs));
+        // Migration from localStorage if IndexedDB is empty
+        if (!savedWardrobe) {
+          const localWardrobe = localStorage.getItem(STORAGE_KEY_WARDROBE);
+          if (localWardrobe) {
+            try {
+              savedWardrobe = JSON.parse(localWardrobe);
+              await set(STORAGE_KEY_WARDROBE, savedWardrobe);
+              localStorage.removeItem(STORAGE_KEY_WARDROBE);
+            } catch (e) {
+              console.error("Failed to migrate wardrobe from localStorage", e);
+            }
+          }
+        }
+        if (!savedOutfits) {
+          const localOutfits = localStorage.getItem(STORAGE_KEY_OUTFITS);
+          if (localOutfits) {
+            try {
+              savedOutfits = JSON.parse(localOutfits);
+              await set(STORAGE_KEY_OUTFITS, savedOutfits);
+              localStorage.removeItem(STORAGE_KEY_OUTFITS);
+            } catch (e) {
+              console.error("Failed to migrate outfits from localStorage", e);
+            }
+          }
+        }
+        if (!savedPrefs) {
+          const localPrefs = localStorage.getItem(STORAGE_KEY_PREFS);
+          if (localPrefs) {
+            try {
+              savedPrefs = JSON.parse(localPrefs);
+              await set(STORAGE_KEY_PREFS, savedPrefs);
+              localStorage.removeItem(STORAGE_KEY_PREFS);
+            } catch (e) {
+              console.error("Failed to migrate prefs from localStorage", e);
+            }
+          }
+        }
+
+        if (savedWardrobe) setWardrobe(savedWardrobe);
+        if (savedOutfits) setOutfits(savedOutfits);
+        if (savedPrefs) setPrefs(savedPrefs);
+      } catch (error) {
+        console.error("Failed to load data from storage", error);
+      } finally {
+        setIsLoaded(true);
+      }
+    };
+    loadData();
   }, []);
 
-  // Save data to localStorage
+  // Save data to IndexedDB
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_WARDROBE, JSON.stringify(wardrobe));
-  }, [wardrobe]);
+    if (isLoaded) {
+      set(STORAGE_KEY_WARDROBE, wardrobe).catch(err => console.error("Failed to save wardrobe", err));
+    }
+  }, [wardrobe, isLoaded]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_OUTFITS, JSON.stringify(outfits));
-  }, [outfits]);
+    if (isLoaded) {
+      set(STORAGE_KEY_OUTFITS, outfits).catch(err => console.error("Failed to save outfits", err));
+    }
+  }, [outfits, isLoaded]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_PREFS, JSON.stringify(prefs));
-  }, [prefs]);
+    if (isLoaded) {
+      set(STORAGE_KEY_PREFS, prefs).catch(err => console.error("Failed to save prefs", err));
+    }
+  }, [prefs, isLoaded]);
 
   const handleFileUpload = async (files: File[]) => {
     if (files.length === 0) return;
