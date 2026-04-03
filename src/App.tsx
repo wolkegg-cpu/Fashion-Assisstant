@@ -48,7 +48,7 @@ export default function App() {
   
   // New States
   const [wardrobeFilter, setWardrobeFilter] = useState<string>('all');
-  const [generatorAdviceTab, setGeneratorAdviceTab] = useState<'info' | 'uplift'>('info');
+  const [generatorAdviceTab, setGeneratorAdviceTab] = useState<'info' | 'uplift' | null>('info');
   const [selectedOutfitItem, setSelectedOutfitItem] = useState<ClothingItem | null>(null);
 
   // Crop Modal State
@@ -61,6 +61,7 @@ export default function App() {
   const [isMagicCutMode, setIsMagicCutMode] = useState(false);
   const [selectionPath, setSelectionPath] = useState<{ x: number, y: number }[]>([]);
   const [bulkUploadProgress, setBulkUploadProgress] = useState<{ current: number, total: number } | null>(null);
+  const [outfitPositions, setOutfitPositions] = useState<Record<string, { x: number, y: number }>>({});
   const [isDrawing, setIsDrawing] = useState(false);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
 
@@ -291,6 +292,10 @@ export default function App() {
         }));
 
         const cutImage = await magicCutClothingItem(base64, normalizedPath);
+        
+        // Add a small delay to avoid hitting rate limits on back-to-back AI calls
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
         const cutBase64 = cutImage.split(',')[1];
         const tags = await tagClothingItem(cutBase64);
         
@@ -395,6 +400,18 @@ export default function App() {
     try {
       const result = await generateOutfit(wardrobe, prefs, occasion, weather);
       const selectedItems = wardrobe.filter(item => result.itemIds.includes(item.id));
+      
+      // Initialize positions for the canvas
+      const newPositions: Record<string, { x: number, y: number }> = {};
+      selectedItems.forEach((item, index) => {
+        // Spread items out a bit initially
+        newPositions[item.id] = { 
+          x: (index % 2) * 150 + 20, 
+          y: Math.floor(index / 2) * 200 + 20 
+        };
+      });
+      setOutfitPositions(newPositions);
+
       setCurrentOutfit({ 
         items: selectedItems, 
         explanation: result.explanation,
@@ -722,171 +739,173 @@ export default function App() {
           )}
 
           {activeTab === 'generator' && (
-            <motion.div key="generator" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-8">
-              <header>
-                <h1 className="text-3xl font-bold">Outfit Generator</h1>
-                <p className="text-zinc-400">Let AI curate the perfect look from your wardrobe</p>
-              </header>
+            <motion.div key="generator" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-8 min-h-[70vh]">
+              {!currentOutfit ? (
+                <>
+                  <header>
+                    <h1 className="text-3xl font-bold">Outfit Generator</h1>
+                    <p className="text-zinc-400">Let AI curate the perfect look from your wardrobe</p>
+                  </header>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="md:col-span-1 space-y-6">
-                  <div className="p-6 rounded-3xl bg-zinc-900 border border-zinc-800 space-y-4">
-                    <div className="space-y-4">
-                      <div>
-                        <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest block mb-2 ml-1">Occasion</label>
-                        <select id="occasion" className="w-full bg-zinc-800/50 border border-zinc-700 rounded-2xl p-4 text-lg font-medium focus:ring-2 focus:ring-indigo-500 outline-none transition-all appearance-none cursor-pointer">
-                          <option>Casual Day Out</option>
-                          <option>Gym / Workout</option>
-                          <option>Formal Event</option>
-                          <option>Date Night</option>
-                          <option>Office / Work</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest block mb-2 ml-1">Weather</label>
-                        <select id="weather" className="w-full bg-zinc-800/50 border border-zinc-700 rounded-2xl p-4 text-lg font-medium focus:ring-2 focus:ring-indigo-500 outline-none transition-all appearance-none cursor-pointer">
-                          <option>Sunny & Warm</option>
-                          <option>Cold & Rainy</option>
-                          <option>Snowy</option>
-                          <option>Mild / Spring</option>
-                        </select>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="md:col-span-1 space-y-6">
+                      <div className="p-6 rounded-3xl bg-zinc-900 border border-zinc-800 space-y-4">
+                        <div className="space-y-4">
+                          <div>
+                            <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest block mb-2 ml-1">Occasion</label>
+                            <select id="occasion" className="w-full bg-zinc-800/50 border border-zinc-700 rounded-2xl p-4 text-lg font-medium focus:ring-2 focus:ring-indigo-500 outline-none transition-all appearance-none cursor-pointer">
+                              <option>Casual Day Out</option>
+                              <option>Gym / Workout</option>
+                              <option>Formal Event</option>
+                              <option>Date Night</option>
+                              <option>Office / Work</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest block mb-2 ml-1">Weather</label>
+                            <select id="weather" className="w-full bg-zinc-800/50 border border-zinc-700 rounded-2xl p-4 text-lg font-medium focus:ring-2 focus:ring-indigo-500 outline-none transition-all appearance-none cursor-pointer">
+                              <option>Sunny & Warm</option>
+                              <option>Cold & Rainy</option>
+                              <option>Snowy</option>
+                              <option>Mild / Spring</option>
+                            </select>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => handleGenerateOutfit(
+                            (document.getElementById('occasion') as HTMLSelectElement).value,
+                            (document.getElementById('weather') as HTMLSelectElement).value
+                          )}
+                          disabled={isLoading || wardrobe.length === 0}
+                          className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-2xl font-semibold flex items-center justify-center gap-2 transition-all"
+                        >
+                          {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+                          Generate Fit
+                        </button>
+                        {wardrobe.length === 0 && (
+                          <p className="text-xs text-amber-400 text-center">Add items to your wardrobe first!</p>
+                        )}
                       </div>
                     </div>
-                    <button 
-                      onClick={() => handleGenerateOutfit(
-                        (document.getElementById('occasion') as HTMLSelectElement).value,
-                        (document.getElementById('weather') as HTMLSelectElement).value
-                      )}
-                      disabled={isLoading || wardrobe.length === 0}
-                      className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white py-4 rounded-2xl font-semibold flex items-center justify-center gap-2 transition-all"
-                    >
-                      {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-                      Generate Fit
-                    </button>
-                    {wardrobe.length === 0 && (
-                      <p className="text-xs text-amber-400 text-center">Add items to your wardrobe first!</p>
-                    )}
-                  </div>
-                </div>
 
-                <div className="md:col-span-2">
-                  {currentOutfit ? (
-                    <div className="space-y-6">
-                      <div className="grid grid-cols-2 gap-4">
-                        {currentOutfit.items.map(item => (
-                          <div 
-                            key={item.id} 
-                            onClick={() => setSelectedOutfitItem(item)}
-                            className="group relative aspect-[3/4] rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-900 cursor-pointer hover:border-indigo-500/50 transition-all"
-                          >
-                            <img src={item.imageUrl} alt={item.type} className="w-full h-full object-cover transition-transform group-hover:scale-105" referrerPolicy="no-referrer" />
-                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                              <span className="bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-full text-xs font-medium border border-white/20">View Details</span>
+                    <div className="md:col-span-2 flex items-center justify-center p-12 border-2 border-dashed border-zinc-800 rounded-[3rem] bg-zinc-900/20">
+                      <div className="text-center space-y-4">
+                        <div className="w-20 h-20 bg-zinc-800 rounded-full flex items-center justify-center mx-auto">
+                          <Shirt className="w-10 h-10 text-zinc-600" />
+                        </div>
+                        <h3 className="text-xl font-bold text-zinc-400">Ready to Style</h3>
+                        <p className="text-zinc-500 max-w-xs mx-auto">Select an occasion and weather to see your AI-curated outfit.</p>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="relative h-[75vh] md:h-[80vh] w-full overflow-hidden bg-zinc-900/40 rounded-[3rem] border border-zinc-800/50 backdrop-blur-sm shadow-2xl">
+                  {/* Canvas Area */}
+                  <div className="absolute inset-0 p-8 touch-none">
+                    <div className="absolute top-6 left-8 z-50">
+                      <button 
+                        onClick={() => setCurrentOutfit(null)}
+                        className="flex items-center gap-2 px-4 py-2 bg-zinc-900/80 backdrop-blur-md border border-zinc-800 rounded-xl text-xs font-bold uppercase tracking-widest text-zinc-400 hover:text-white transition-colors"
+                      >
+                        <ChevronRight className="w-4 h-4 rotate-180" />
+                        New Outfit
+                      </button>
+                    </div>
+
+                    <div className="w-full h-full relative">
+                      {currentOutfit.items.map((item, index) => (
+                        <motion.div
+                          key={item.id}
+                          drag
+                          dragMomentum={false}
+                          initial={{ 
+                            x: outfitPositions[item.id]?.x || 0, 
+                            y: outfitPositions[item.id]?.y || 0,
+                            scale: 0.8,
+                            opacity: 0
+                          }}
+                          animate={{ 
+                            scale: 1, 
+                            opacity: 1,
+                            transition: { delay: index * 0.1 }
+                          }}
+                          className="absolute cursor-grab active:cursor-grabbing z-10"
+                          style={{ width: 140 }}
+                        >
+                          <div className="relative group">
+                            <img 
+                              src={item.imageUrl} 
+                              className="w-full aspect-[3/4] object-cover rounded-2xl shadow-2xl border-2 border-zinc-800/50 group-hover:border-indigo-500/50 transition-colors" 
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="absolute -bottom-2 -right-2 bg-zinc-900 border border-zinc-800 px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider text-zinc-400 shadow-xl">
+                              {item.type}
                             </div>
                           </div>
-                        ))}
-                      </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </div>
 
-                      {/* Interactive Item Details */}
-                      <AnimatePresence>
-                        {selectedOutfitItem && (
-                          <motion.div 
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="overflow-hidden"
-                          >
-                            <div className="p-6 rounded-3xl bg-zinc-900 border border-zinc-800 flex items-center gap-6 relative">
-                              <div className="w-24 h-32 rounded-xl overflow-hidden flex-shrink-0 border border-zinc-800">
-                                <img src={selectedOutfitItem.imageUrl} className="w-full h-full object-cover" />
-                              </div>
-                              <div className="flex-1">
-                                <h4 className="text-lg font-semibold capitalize">{selectedOutfitItem.type}</h4>
-                                <div className="flex flex-wrap gap-2 mt-2">
-                                  <span className="px-2 py-1 rounded-lg bg-zinc-800 text-[10px] uppercase tracking-wider font-bold text-zinc-400 border border-zinc-700">{selectedOutfitItem.color}</span>
-                                  <span className="px-2 py-1 rounded-lg bg-zinc-800 text-[10px] uppercase tracking-wider font-bold text-zinc-400 border border-zinc-700">{selectedOutfitItem.vibe}</span>
-                                  <span className="px-2 py-1 rounded-lg bg-zinc-800 text-[10px] uppercase tracking-wider font-bold text-zinc-400 border border-zinc-700">{selectedOutfitItem.category}</span>
-                                </div>
-                                <p className="text-zinc-500 text-sm mt-3">This {selectedOutfitItem.type} is a key piece for your {prefs.style} look.</p>
-                              </div>
-                              <button 
-                                onClick={() => setSelectedOutfitItem(null)}
-                                className="absolute top-4 right-4 p-2 text-zinc-500 hover:text-white"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </motion.div>
+                  {/* Overlay Buttons & Info */}
+                  <div className="absolute bottom-8 left-6 right-6 flex flex-col items-center gap-4 z-50">
+                    <div className="flex gap-2 p-1 bg-zinc-900/90 backdrop-blur-xl rounded-2xl border border-zinc-800 shadow-2xl">
+                      <button 
+                        onClick={() => setGeneratorAdviceTab(generatorAdviceTab === 'info' ? null : 'info')}
+                        className={cn(
+                          "px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all flex items-center gap-2",
+                          generatorAdviceTab === 'info' ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/20" : "text-zinc-500 hover:text-zinc-300"
                         )}
-                      </AnimatePresence>
+                      >
+                        <Info className="w-4 h-4" />
+                        Info
+                      </button>
+                      <button 
+                        onClick={() => setGeneratorAdviceTab(generatorAdviceTab === 'uplift' ? null : 'uplift')}
+                        className={cn(
+                          "px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all flex items-center gap-2",
+                          generatorAdviceTab === 'uplift' ? "bg-amber-500 text-white shadow-lg shadow-amber-500/20" : "text-zinc-500 hover:text-zinc-300"
+                        )}
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        Advice
+                      </button>
+                    </div>
 
-                      <div className="space-y-4">
-                        <div className="flex gap-2 p-1 bg-zinc-900 rounded-2xl border border-zinc-800 w-fit">
+                    <AnimatePresence mode="wait">
+                      {generatorAdviceTab && (
+                        <motion.div 
+                          key={generatorAdviceTab}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 20 }}
+                          className="w-full max-w-lg p-6 rounded-3xl bg-zinc-900/90 backdrop-blur-xl border border-zinc-800 shadow-2xl relative"
+                        >
                           <button 
-                            onClick={() => setGeneratorAdviceTab('info')}
-                            className={cn(
-                              "px-6 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center gap-2",
-                              generatorAdviceTab === 'info' ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/20" : "text-zinc-500 hover:text-zinc-300"
-                            )}
+                            onClick={() => setGeneratorAdviceTab(null)}
+                            className="absolute top-4 right-4 p-1 text-zinc-500 hover:text-white transition-colors"
                           >
-                            <Info className="w-4 h-4" />
-                            Outfit Info
+                            <X className="w-4 h-4" />
                           </button>
-                          <button 
-                            onClick={() => setGeneratorAdviceTab('uplift')}
-                            className={cn(
-                              "px-6 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center gap-2",
-                              generatorAdviceTab === 'uplift' ? "bg-amber-500 text-white shadow-lg shadow-amber-500/20" : "text-zinc-500 hover:text-zinc-300"
-                            )}
-                          >
-                            <Sparkles className="w-4 h-4" />
-                            Uplift Advice
-                          </button>
-                        </div>
-
-                        <AnimatePresence mode="wait">
+                          
                           {generatorAdviceTab === 'info' ? (
-                            <motion.div 
-                              key="info"
-                              initial={{ opacity: 0, x: -10 }}
-                              animate={{ opacity: 1, x: 0 }}
-                              exit={{ opacity: 0, x: 10 }}
-                              className="p-8 rounded-3xl bg-indigo-600/10 border border-indigo-500/20"
-                            >
-                              <h3 className="text-lg font-bold text-indigo-400 mb-3">Why this works</h3>
-                              <p className="text-zinc-300 leading-relaxed text-lg">{currentOutfit.explanation}</p>
-                              <div className="mt-6 flex items-center gap-2 text-xs font-medium text-indigo-400/60 uppercase tracking-widest">
-                                <div className="w-1 h-1 rounded-full bg-indigo-400" />
-                                Perfect for your style
-                              </div>
-                            </motion.div>
+                            <>
+                              <h3 className="text-sm font-bold text-indigo-400 mb-2 uppercase tracking-widest">Why this works</h3>
+                              <p className="text-zinc-300 leading-relaxed text-sm">{currentOutfit.explanation}</p>
+                            </>
                           ) : (
-                            <motion.div 
-                              key="uplift"
-                              initial={{ opacity: 0, x: 10 }}
-                              animate={{ opacity: 1, x: 0 }}
-                              exit={{ opacity: 0, x: -10 }}
-                              className="p-8 rounded-3xl bg-amber-500/10 border border-amber-500/20"
-                            >
-                              <h3 className="text-lg font-bold text-amber-500 mb-3">Take it to the next level</h3>
-                              <p className="text-zinc-300 leading-relaxed text-lg">{currentOutfit.upliftAdvice}</p>
-                              <div className="mt-6 flex items-center gap-2 text-xs font-medium text-amber-500/60 uppercase tracking-widest">
-                                <div className="w-1 h-1 rounded-full bg-amber-500" />
-                                Pro Styling Tip
-                              </div>
-                            </motion.div>
+                            <>
+                              <h3 className="text-sm font-bold text-amber-500 mb-2 uppercase tracking-widest">Pro Styling Tip</h3>
+                              <p className="text-zinc-300 leading-relaxed text-sm">{currentOutfit.upliftAdvice}</p>
+                            </>
                           )}
-                        </AnimatePresence>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="h-full min-h-[400px] rounded-3xl border-2 border-dashed border-zinc-800 flex flex-col items-center justify-center text-zinc-500 p-12 text-center">
-                      <Sparkles className="w-12 h-12 mb-4 opacity-20" />
-                      <p>Select your occasion and weather to see AI suggestions.</p>
-                    </div>
-                  )}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 </div>
-              </div>
+              )}
             </motion.div>
           )}
 
