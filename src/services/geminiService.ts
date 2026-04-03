@@ -1,10 +1,13 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ClothingItem, UserPreferences } from "../types";
 
-const apiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "";
-const ai = new GoogleGenAI({ apiKey });
+const getAI = () => {
+  const apiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "";
+  return new GoogleGenAI({ apiKey });
+};
 
 export const tagClothingItem = async (base64Image: string): Promise<Partial<ClothingItem>> => {
+  const ai = getAI();
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: [
@@ -39,6 +42,7 @@ export const generateOutfit = async (
   occasion: string,
   weather: string
 ): Promise<{ itemIds: string[]; explanation: string; upliftAdvice: string }> => {
+  const ai = getAI();
   const wardrobeDescription = wardrobe.map(item => 
     `ID: ${item.id}, Type: ${item.type}, Color: ${item.color}, Vibe: ${item.vibe}, Category: ${item.category}`
   ).join("\n");
@@ -82,6 +86,7 @@ export const rateOutfit = async (
   base64Image: string,
   preferences: UserPreferences
 ): Promise<{ rating: number; feedback: string }> => {
+  const ai = getAI();
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: [
@@ -112,6 +117,7 @@ export const updatePreferencesFromItem = async (
   currentPrefs: UserPreferences,
   newItem: Partial<ClothingItem>
 ): Promise<UserPreferences> => {
+  const ai = getAI();
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: `
@@ -151,10 +157,11 @@ export const magicCutClothingItem = async (
   base64Image: string,
   selectionPath: { x: number; y: number }[]
 ): Promise<string> => {
+  const ai = getAI();
   // We send the image and describe the selection to Gemini to "cut it out"
-  // Gemini 3.1 Flash Image is great for this kind of visual reasoning and editing
+  // gemini-2.5-flash-image is the default for image editing tasks
   const response = await ai.models.generateContent({
-    model: "gemini-3.1-flash-image-preview",
+    model: "gemini-2.5-flash-image",
     contents: [
       {
         parts: [
@@ -170,17 +177,18 @@ export const magicCutClothingItem = async (
     ],
     config: {
       imageConfig: {
-        aspectRatio: "3:4",
-        imageSize: "1K"
+        aspectRatio: "3:4"
       }
     }
   });
 
-  for (const part of response.candidates?.[0]?.content?.parts || []) {
-    if (part.inlineData) {
-      return `data:image/png;base64,${part.inlineData.data}`;
+  if (response.candidates?.[0]?.content?.parts) {
+    for (const part of response.candidates[0].content.parts) {
+      if (part.inlineData) {
+        return `data:image/png;base64,${part.inlineData.data}`;
+      }
     }
   }
 
-  throw new Error("Gemini failed to generate the cut-out image.");
+  throw new Error("Gemini failed to generate the cut-out image. Please try selecting the item more clearly.");
 };
